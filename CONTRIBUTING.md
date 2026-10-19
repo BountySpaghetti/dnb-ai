@@ -2,28 +2,14 @@
 
 Thank you for your interest in contributing to Deen Bridge! This is the AI service that powers intelligent features across the platform.
 
-## Drips Wave Program
+## Contribution Workflow
 
-This repository participates in the **Stellar Drips Wave** bounty program. Contributors can earn rewards by resolving issues during Wave cycles. Everyone is welcome to contribute — no religious background or knowledge is required; our issues are regular engineering tasks.
+1. Find or open an issue describing the change.
+2. Create a focused branch from `dev` and implement the change.
+3. Run the relevant checks described below.
+4. Open a pull request against `dev`, link the issue, and summarize the changes and checks.
 
-### How It Works
-
-1. **Find an Issue**: During an active Wave, browse this repo's issues in the [Drips Wave app](https://www.drips.network/wave)
-2. **Apply**: Apply to work on the issue through the Drips Wave app; the maintainer reviews applications and assigns one contributor
-3. **Submit a PR**: Complete the work and open a pull request (base branch `dev`) before the Wave ends
-4. **Earn Points**: Once the issue is marked resolved during the Wave, you earn its Points, which convert to rewards from the Wave pool
-
-### Complexity & Points
-
-Points are assigned per issue by the maintainer in the Drips Wave dashboard using Drips' three complexity tiers:
-
-| Complexity | Points | Typical Scope                              |
-| ---------- | ------ | ------------------------------------------ |
-| Trivial    | 100    | Typos, small bug fixes, minor copy changes |
-| Medium     | 150    | Standard features or involved bug fixes    |
-| High       | 200    | Complex features, refactors, integrations  |
-
-Issues carry `complexity:trivial`, `complexity:medium`, or `complexity:high` labels that mirror these tiers.
+Everyone is welcome to contribute. No religious background or prior Islamic studies knowledge is required for regular engineering tasks.
 
 ## Getting Started
 
@@ -46,6 +32,9 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Install the lint/type/test tooling CI runs
+pip install -r requirements-dev.txt
 
 # Create .env file from template
 cp .env.example .env
@@ -98,6 +87,29 @@ Maintainers periodically merge `dev` into `main` for releases. Pull requests ope
 3. Write docstrings for functions and classes
 4. Keep functions focused and small
 
+Linting, formatting, and type checking are enforced in CI by [ruff](https://docs.astral.sh/ruff/)
+and [mypy](https://mypy.readthedocs.io/), configured in `pyproject.toml` (line length 120).
+Run these locally before pushing — CI runs exactly the same commands:
+
+```bash
+ruff check .          # lint (pycodestyle, pyflakes, import sorting, pyupgrade, bugbear)
+ruff format .         # format the code (use `ruff format --check .` to only verify)
+mypy .                # type check
+```
+
+`ruff check --fix .` applies the fixes ruff can make automatically.
+
+`main.py` is type-checked with `disallow_untyped_defs`: every function there needs
+parameter and return annotations. The rest of the tree is checked less strictly for now —
+please annotate new code anyway.
+
+Optionally, install the git hook so the same checks run before each commit:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
 ### API Design
 
 1. Use proper HTTP status codes
@@ -122,6 +134,7 @@ We follow Conventional Commits:
 3. **Description**: Explain what and why
 4. **Link Issue**: Reference the issue number (`Closes #123`)
 5. **Testing**: Describe how you tested the changes
+6. **Auto-merge gates**: eligible, non-draft PRs targeting `dev` are squash-merged when CI and all reported statuses pass, the branch has no conflicts, review requests and threads are resolved, and no `hold`, `do-not-merge`, or `manual-review` label is present.
 
 ## Code of Conduct
 

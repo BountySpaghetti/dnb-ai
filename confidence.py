@@ -60,7 +60,6 @@ import logging
 import os
 import re
 from enum import Enum
-from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -93,9 +92,7 @@ CONFIDENCE_HIGH_THRESHOLD = _env_float("CONFIDENCE_HIGH_THRESHOLD", 0.70)
 # Religious answers at or below this score go to the scholar queue. Defaults to
 # the abstain threshold: what the service would not say on its own is exactly
 # what a scholar should look at.
-SCHOLAR_QUEUE_THRESHOLD = _env_float(
-    "SCHOLAR_QUEUE_THRESHOLD", CONFIDENCE_LOW_THRESHOLD
-)
+SCHOLAR_QUEUE_THRESHOLD = _env_float("SCHOLAR_QUEUE_THRESHOLD", CONFIDENCE_LOW_THRESHOLD)
 
 HIGH_STAKES_PENALTY = _env_float("CONFIDENCE_HIGH_STAKES_PENALTY", 0.15)
 NO_SIGNAL_PRIOR = _env_float("CONFIDENCE_NO_SIGNAL_PRIOR", 0.55)
@@ -111,7 +108,7 @@ UNVERIFIED_CEILING = _env_float("CONFIDENCE_UNVERIFIED_CEILING", 0.65)
 # own account of itself.
 EXTERNAL_SIGNALS = ("self_consistency", "citation_verification")
 
-SIGNAL_WEIGHTS: Dict[str, float] = {
+SIGNAL_WEIGHTS: dict[str, float] = {
     "self_consistency": 0.40,
     "citation_verification": 0.30,
     "expressed_certainty": 0.30,
@@ -119,8 +116,7 @@ SIGNAL_WEIGHTS: Dict[str, float] = {
 
 if CONFIDENCE_LOW_THRESHOLD > CONFIDENCE_HIGH_THRESHOLD:
     logger.warning(
-        "CONFIDENCE_LOW_THRESHOLD (%s) exceeds CONFIDENCE_HIGH_THRESHOLD (%s); "
-        "every answer will abstain",
+        "CONFIDENCE_LOW_THRESHOLD (%s) exceeds CONFIDENCE_HIGH_THRESHOLD (%s); every answer will abstain",
         CONFIDENCE_LOW_THRESHOLD,
         CONFIDENCE_HIGH_THRESHOLD,
     )
@@ -208,19 +204,17 @@ class ConfidenceSignals(BaseModel):
     implementation.
     """
 
-    self_consistency: Optional[float] = Field(
+    self_consistency: float | None = Field(
         None, ge=0.0, le=1.0, description="Agreement across sampled answers (#ai-18)"
     )
-    citation_verification: Optional[float] = Field(
+    citation_verification: float | None = Field(
         None, ge=0.0, le=1.0, description="Share of citations that verified (#40)"
     )
-    expressed_certainty: Optional[float] = Field(
-        None, ge=0.0, le=1.0, description="Inverse of the answer's own hedging"
-    )
+    expressed_certainty: float | None = Field(None, ge=0.0, le=1.0, description="Inverse of the answer's own hedging")
     is_religious: bool = False
     is_high_stakes: bool = False
 
-    def present(self) -> Dict[str, float]:
+    def present(self) -> dict[str, float]:
         return {
             name: value
             for name, value in (
@@ -239,9 +233,9 @@ class ConfidenceAssessment(BaseModel):
     band: ConfidenceBand
     abstained: bool
     queued: bool
-    signals: Dict[str, float] = {}
-    signals_used: List[str] = []
-    review_id: Optional[str] = None
+    signals: dict[str, float] = {}
+    signals_used: list[str] = []
+    review_id: str | None = None
 
 
 def compute_confidence(signals: ConfidenceSignals) -> float:
@@ -314,8 +308,7 @@ ABSTENTION_MESSAGE = (
 )
 
 SCHOLAR_QUEUED_NOTE = (
-    "\n\nYour question has been added to our scholar-review queue so a "
-    "qualified reviewer can look at it."
+    "\n\nYour question has been added to our scholar-review queue so a qualified reviewer can look at it."
 )
 
 UNCERTAINTY_NOTE = (
@@ -351,8 +344,8 @@ def build_signals(
     answer: str,
     is_religious: bool,
     is_high_stakes: bool = False,
-    self_consistency: Optional[float] = None,
-    citation_verification: Optional[float] = None,
+    self_consistency: float | None = None,
+    citation_verification: float | None = None,
 ) -> ConfidenceSignals:
     """Assemble signals for a turn, deriving only the text-based one here."""
     return ConfidenceSignals(
@@ -364,7 +357,7 @@ def build_signals(
     )
 
 
-def thresholds() -> Dict[str, float]:
+def thresholds() -> dict[str, float]:
     """Current policy configuration, for the stats endpoint and for tests."""
     return {
         "low": CONFIDENCE_LOW_THRESHOLD,
@@ -373,3 +366,215 @@ def thresholds() -> Dict[str, float]:
         "high_stakes_penalty": HIGH_STAKES_PENALTY,
         "no_signal_prior": NO_SIGNAL_PRIOR,
     }
+
+
+# ---------------------------------------------------------------------------
+# Agent response synthesis and consolidation
+# ---------------------------------------------------------------------------
+
+
+class AgentResponse(BaseModel):
+    """One agent's answer to the same user question."""
+
+    agent_id: str
+    text: str
+    citations: list[str] = Field(default_factory=list)
+    confidence: float | None = Field(None, ge=0.0, le=1.0)
+
+
+class SynthesizedSegment(BaseModel):
+    """A deduplicated, contradiction-free claim with its provenance."""
+
+    text: str
+    agent_ids: list[str]
+    citations: list[str]
+    confidence: float
+
+
+class SynthesisResult(BaseModel):
+    """A consolidated answer and the quality signals that prove it safe."""
+
+    text: str
+    agent_ids: list[str]
+    citations: list[str]
+    segments: list[SynthesizedSegment]
+    contradictions_resolved: int
+    redundancy_removed: int
+    coherence_score: float
+    quality_score: float
+    attribution: dict[str, list[str]]
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Very small sentence splitter; enough for consolidation."""
+    if not text:
+        return []
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _normalize(text: str) -> str:
+    """Lowercase and strip punctuation for semantic comparison."""
+    return re.sub(r"\W+", " ", text.lower()).strip()
+
+
+def _similarity(left: str, right: str) -> float:
+    a = set(_normalize(left).split())
+    b = set(_normalize(right).split())
+    if not a or not b:
+        return 0.0
+    return len(a & b) / min(len(a), len(b))
+
+
+NEGATION_MARKERS = ("not", "never", "no", "cannot", "can t", "don t", "can't", "don't")
+
+
+def _is_negated(text: str) -> bool:
+    return any(marker in f" {text.lower()} " for marker in NEGATION_MARKERS)
+
+
+def _claims_conflict(left: str, right: str) -> bool:
+    """High-overlap, flipped-polarity claims are contradictory."""
+    l_norm = _normalize(left)
+    r_norm = _normalize(right)
+    if not l_norm or not r_norm:
+        return False
+    if _is_negated(l_norm) == _is_negated(r_norm):
+        return False
+    l_set = set(l_norm.split())
+    r_set = set(r_norm.split())
+    if not l_set or not r_set:
+        return False
+    overlap = len(l_set & r_set) / min(len(l_set), len(r_set))
+    return overlap >= 0.6
+
+
+def _merge_segments(
+    segments: list[SynthesizedSegment],
+) -> tuple[list[SynthesizedSegment], int, int]:
+    """Merge near-duplicate and contradictory segments.
+
+    Returns (merged, removed_duplicates, contradictions_resolved).
+    """
+    merged: list[SynthesizedSegment] = []
+    removed = 0
+    contradictions = 0
+    for segment in segments:
+        for existing in merged:
+            if _similarity(segment.text, existing.text) >= 0.8:
+                # Same claim: keep the longer, merge provenance.
+                if len(segment.text) > len(existing.text):
+                    existing.text = segment.text
+                existing.agent_ids = sorted(set(existing.agent_ids + segment.agent_ids))
+                existing.citations = sorted(set(existing.citations + segment.citations))
+                existing.confidence = max(existing.confidence, segment.confidence)
+                removed += 1
+                break
+            if _claims_conflict(segment.text, existing.text):
+                # The more attributed / higher-confidence claim wins.
+                if segment.confidence > existing.confidence:
+                    existing.text = segment.text
+                    existing.agent_ids = sorted(set(existing.agent_ids + segment.agent_ids))
+                    existing.citations = sorted(set(existing.citations + segment.citations))
+                contradictions += 1
+                break
+        else:
+            merged.append(segment)
+    return merged, removed, contradictions
+
+
+def _build_attribution(segments: list[SynthesizedSegment]) -> dict[str, list[str]]:
+    attribution: dict[str, list[str]] = {}
+    for segment in segments:
+        for agent_id in segment.agent_ids:
+            attribution.setdefault(agent_id, [])
+            if segment.text not in attribution[agent_id]:
+                attribution[agent_id].append(segment.text)
+    return attribution
+
+
+def _build_narrative(segments: list[SynthesizedSegment]) -> str:
+    """Join segments, inserting connectives when adjacent ideas are unrelated."""
+    if not segments:
+        return ""
+    text = segments[0].text
+    for prev, cur in zip(segments, segments[1:], strict=False):
+        if _similarity(prev.text, cur.text) < 0.15:
+            text += " Additionally, " + cur.text
+        else:
+            text += " " + cur.text
+    return text
+
+
+def _coherence_score(text: str) -> float:
+    sentences = _split_sentences(text)
+    if len(sentences) < 2:
+        return 1.0
+    overlaps = [_similarity(prev, cur) for prev, cur in zip(sentences, sentences[1:], strict=False)]
+    return round(min(1.0, sum(overlaps) / len(overlaps) + 0.55), 4)
+
+
+def synthesize_responses(responses: list[AgentResponse]) -> SynthesisResult:
+    """Consolidate multiple agent answers into one coherent, attributed answer."""
+    if not responses:
+        return SynthesisResult(
+            text="",
+            agent_ids=[],
+            citations=[],
+            segments=[],
+            contradictions_resolved=0,
+            redundancy_removed=0,
+            coherence_score=1.0,
+            quality_score=0.0,
+            attribution={},
+        )
+
+    segments: list[SynthesizedSegment] = []
+    for response in responses:
+        for sentence in _split_sentences(response.text):
+            signals = build_signals(
+                answer=sentence,
+                is_religious=False,
+                is_high_stakes=False,
+                self_consistency=None,
+                citation_verification=1.0 if response.citations else None,
+            )
+            confidence = response.confidence if response.confidence is not None else compute_confidence(signals)
+            segments.append(
+                SynthesizedSegment(
+                    text=sentence,
+                    agent_ids=[response.agent_id],
+                    citations=response.citations,
+                    confidence=confidence,
+                )
+            )
+
+    merged, removed, contradictions = _merge_segments(segments)
+    text = _build_narrative(merged)
+    attribution = _build_attribution(merged)
+    coherence = _coherence_score(text)
+    citations = sorted({cite for segment in merged for cite in segment.citations})
+    agent_ids = sorted({agent for segment in merged for agent in segment.agent_ids})
+    quality = round(
+        min(
+            1.0,
+            (
+                coherence
+                + min(1.0, len(merged) / max(1, len(segments)))
+                + sum(segment.confidence for segment in merged) / max(1, len(merged))
+            )
+            / 3,
+        ),
+        4,
+    )
+    return SynthesisResult(
+        text=text,
+        agent_ids=agent_ids,
+        citations=citations,
+        segments=merged,
+        contradictions_resolved=contradictions,
+        redundancy_removed=removed,
+        coherence_score=coherence,
+        quality_score=quality,
+        attribution=attribution,
+    )

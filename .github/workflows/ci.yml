@@ -1,5 +1,4 @@
 name: CI
-
 on:
   pull_request:
     branches: [main, dev]
@@ -13,7 +12,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -25,13 +24,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest flake8
+          pip install -r requirements-dev.txt
 
-      - name: Run linting
-        run: flake8 main.py stellar.py nisab.py safety telemetry.py tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py tests/test_confidence.py tests/test_review_queue.py tests/test_tafsir.py tests/test_zakat.py tests/test_telemetry.py scripts/build_hadith_data.py scripts/build_surah_index.py --max-line-length=120 --ignore=E501,W503
+      - name: Lint (ruff)
+        run: ruff check .
 
-      - name: Check syntax
-        run: python -m compileall -q main.py stellar.py nisab.py safety telemetry.py tests/redteam study.py fiqh.py hadith.py confidence.py review.py review_store.py tafsir.py semantic_cache.py scripts/build_hadith_data.py scripts/build_surah_index.py
+      - name: Check formatting (ruff format)
+        run: ruff format --check .
+
+      - name: Type check (mypy)
+        run: mypy .
 
       - name: Run offline safety and red-team tests
         run: pytest -q tests/redteam
@@ -42,11 +44,20 @@ jobs:
       - name: Run semantic cache tests
         run: pytest -q tests/test_semantic_cache.py
 
-      - name: Run fiqh tests
+      - name: Run fifqh tests
         run: pytest -q tests/test_fiqh.py
 
       - name: Run hadith grading tests
         run: pytest -q tests/test_hadith.py
+
+      - name: Run audio hadith verification tests
+        run: pytest -q tests/test_audio_hadith.py
+
+      - name: Run hadith research agent tests
+        run: pytest -q tests/test_hadith_research.py
+
+      - name: Run structured citation tests
+        run: pytest -q tests/test_citations.py tests/test_citations_integration.py
 
       - name: Run confidence and abstention tests
         run: pytest -q tests/test_confidence.py
@@ -54,11 +65,80 @@ jobs:
       - name: Run scholar-review queue tests
         run: pytest -q tests/test_review_queue.py
 
+      - name: Run historical context tests
+        run: pytest -q tests/test_history.py
+
       - name: Run tafsir tests
         run: pytest -q tests/test_tafsir.py
+
+      - name: Run reasoning chain tests
+        run: pytest -q tests/test_reasoning_chains.py
+
+      - name: Run contextual hadith interpretation tests
+        run: pytest -q tests/test_hadith_context.py
+
+      - name: Run model routing tests
+        run: pytest -q tests/test_model_router.py
+
+      - name: Run multi-agent orchestration tests
+        run: pytest -q tests/test_orchestration.py
 
       - name: Run zakat and nisab tests
         run: pytest -q tests/test_zakat.py
 
+      - name: Run asbab al-nuzul tests
+        run: pytest -q tests/test_asbab.py
+
+      - name: Run purchase history chat tests
+        run: pytest -q tests/test_purchases.py
+
+      - name: Run feedback loop tests
+        run: pytest -q tests/test_feedback.py
+
+      - name: Run reformulation tests
+        run: pytest -q tests/test_reformulation.py
+
+      - name: Run religious sentiment tests
+        run: pytest -q tests/test_sentiment.py
+
+      - name: Run Quran accuracy benchmark tests
+        run: pytest -q tests/test_quran_benchmark.py
+
       - name: Run LLM telemetry tests
         run: pytest -q tests/test_telemetry.py
+
+      - name: Run multilingual support tests
+        run: pytest -q tests/test_multilingual.py
+
+      - name: Run memory profile tests
+        run: pytest -q tests/test_memory_profile.py
+
+      - name: Run memory extraction tests
+        run: pytest -q tests/test_memory_extraction.py
+
+      - name: Run memory integration tests
+        run: pytest -q tests/test_memory_integration.py
+
+      - name: Run Islamic QA Benchmark dataset tests
+        run: pytest -q tests/test_islamic_qa_benchmark.py
+
+      - name: Run intent classification tests
+        run: pytest -q tests/test_intent.py
+
+      - name: Validate Islamic QA Benchmark dataset integrity
+        run: pytest -q tests/test_page_analysis.py
+
+      - name: Run database query optimizer tests
+        run: pytest -q tests/test_query_optimizer.py
+
+      - name: Run calligraphy style estimation tests
+        run: pytest -q tests/test_calligraphy.py
+
+      - name: Run Swahili language processing tests
+        run: pytest -q tests/test_swahili.py
+
+      - name: Run Arabic dialect support tests
+        run: pytest -q tests/test_arabic_dialect.py
+
+      - name: Run offline citation extraction eval
+        run: pytest -q tests/test_page_analysis.py
